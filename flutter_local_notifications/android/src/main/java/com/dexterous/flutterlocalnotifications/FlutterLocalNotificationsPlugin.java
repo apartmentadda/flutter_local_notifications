@@ -187,7 +187,7 @@ public class FlutterLocalNotificationsPlugin
   private MethodChannel channel;
   private Context applicationContext;
   private Activity mainActivity;
-  static final int NOTIFICATION_PERMISSION_REQUEST_CODE = 1;
+  static final int NOTIFICATION_PERMISSION_REQUEST_CODE = 99;
   private PermissionRequestListener callback;
   private boolean permissionRequestInProgress = false;
 
@@ -354,7 +354,15 @@ public class FlutterLocalNotificationsPlugin
     }
 
     if (BooleanUtils.getValue(notificationDetails.fullScreenIntent)) {
-      builder.setFullScreenIntent(pendingIntent, true);
+      Intent fullScreenIntent = getFullScreenIntent(context, notificationDetails);
+      if (fullScreenIntent.resolveActivityInfo(context.getPackageManager(), 0) != null) {
+        PendingIntent fullScreenPendingIntent =
+            PendingIntent.getActivity(context, notificationDetails.id, fullScreenIntent, flags);
+        builder.setFullScreenIntent(fullScreenPendingIntent, true);
+      } else {
+        // fallback to launcher activity intent when activity class not found
+        builder.setFullScreenIntent(pendingIntent, true);
+      }
     }
 
     if (!StringUtils.isNullOrEmpty(notificationDetails.shortcutId)) {
@@ -868,6 +876,14 @@ public class FlutterLocalNotificationsPlugin
     String packageName = context.getPackageName();
     PackageManager packageManager = context.getPackageManager();
     return packageManager.getLaunchIntentForPackage(packageName);
+  }
+
+  private static Intent getFullScreenIntent(Context context, NotificationDetails notificationDetails) {
+    Intent fullScreenIntent = new Intent();
+    fullScreenIntent.setClassName(context, notificationDetails.fullScreenIntentClass);
+    fullScreenIntent.putExtra(NOTIFICATION_ID, notificationDetails.id);
+    fullScreenIntent.putExtra(PAYLOAD, notificationDetails.payload);
+    return fullScreenIntent;
   }
 
   private static void setStyle(
