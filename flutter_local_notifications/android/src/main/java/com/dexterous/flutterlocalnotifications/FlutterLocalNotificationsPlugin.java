@@ -980,7 +980,8 @@ public class FlutterLocalNotificationsPlugin
     return packageManager.getLaunchIntentForPackage(packageName);
   }
 
-  private static Intent getFullScreenIntent(Context context, NotificationDetails notificationDetails) {
+  private static Intent getFullScreenIntent(
+      Context context, NotificationDetails notificationDetails) {
     Intent fullScreenIntent = new Intent();
     fullScreenIntent.setClassName(context, notificationDetails.fullScreenIntentClass);
     fullScreenIntent.putExtra(NOTIFICATION_ID, notificationDetails.id);
