@@ -200,9 +200,9 @@ public class FlutterLocalNotificationsPlugin
   private MethodChannel channel;
   private Context applicationContext;
   private Activity mainActivity;
-  static final int NOTIFICATION_PERMISSION_REQUEST_CODE = 1;
+  static final int NOTIFICATION_PERMISSION_REQUEST_CODE = 90;
 
-  static final int EXACT_ALARM_PERMISSION_REQUEST_CODE = 2;
+  static final int EXACT_ALARM_PERMISSION_REQUEST_CODE = 91;
 
   private PermissionRequestListener callback;
 
