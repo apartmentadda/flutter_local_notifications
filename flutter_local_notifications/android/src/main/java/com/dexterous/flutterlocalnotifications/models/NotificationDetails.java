@@ -3,10 +3,10 @@ package com.dexterous.flutterlocalnotifications.models;
 import android.graphics.Color;
 import android.os.Build.VERSION;
 import android.os.Build.VERSION_CODES;
+
 import androidx.annotation.Keep;
 import androidx.annotation.Nullable;
-import com.dexterous.flutterlocalnotifications.NotificationStyle;
-import com.dexterous.flutterlocalnotifications.RepeatInterval;
+
 import com.dexterous.flutterlocalnotifications.models.styles.BigPictureStyleInformation;
 import com.dexterous.flutterlocalnotifications.models.styles.BigTextStyleInformation;
 import com.dexterous.flutterlocalnotifications.models.styles.DefaultStyleInformation;
@@ -14,6 +14,7 @@ import com.dexterous.flutterlocalnotifications.models.styles.InboxStyleInformati
 import com.dexterous.flutterlocalnotifications.models.styles.MessagingStyleInformation;
 import com.dexterous.flutterlocalnotifications.models.styles.StyleInformation;
 import com.dexterous.flutterlocalnotifications.utils.LongUtils;
+import com.google.gson.annotations.SerializedName;
 
 import java.io.Serializable;
 import java.util.ArrayList;
@@ -29,10 +30,12 @@ public class NotificationDetails implements Serializable {
   private static final String MILLISECONDS_SINCE_EPOCH = "millisecondsSinceEpoch";
   private static final String CALLED_AT = "calledAt";
   private static final String REPEAT_INTERVAL = "repeatInterval";
+  private static final String REPEAT_INTERVAL_MILLISECONDS = "repeatIntervalMilliseconds";
   private static final String REPEAT_TIME = "repeatTime";
   private static final String PLATFORM_SPECIFICS = "platformSpecifics";
   private static final String AUTO_CANCEL = "autoCancel";
   private static final String ONGOING = "ongoing";
+  private static final String SILENT = "silent";
   private static final String STYLE = "style";
   private static final String ICON = "icon";
   private static final String PRIORITY = "priority";
@@ -102,7 +105,7 @@ public class NotificationDetails implements Serializable {
   private static final String VISIBILITY = "visibility";
 
   private static final String TICKER = "ticker";
-  private static final String ALLOW_WHILE_IDLE = "allowWhileIdle";
+  private static final String SCHEDULE_MODE = "scheduleMode";
   private static final String CATEGORY = "category";
   private static final String TIMEOUT_AFTER = "timeoutAfter";
   private static final String SHOW_WHEN = "showWhen";
@@ -144,6 +147,7 @@ public class NotificationDetails implements Serializable {
   public NotificationStyle style;
   public StyleInformation styleInformation;
   public RepeatInterval repeatInterval;
+  public Integer repeatIntervalMilliseconds;
   public Time repeatTime;
   public Long millisecondsSinceEpoch;
   public Long calledAt;
@@ -153,6 +157,7 @@ public class NotificationDetails implements Serializable {
   public Integer groupAlertBehavior;
   public Boolean autoCancel;
   public Boolean ongoing;
+  public Boolean silent;
   public Integer day;
   public Integer color;
   public Object largeIcon;
@@ -169,7 +174,10 @@ public class NotificationDetails implements Serializable {
   public Integer ledOffMs;
   public String ticker;
   public Integer visibility;
-  public Boolean allowWhileIdle;
+
+  @SerializedName(value = "scheduleMode", alternate = "allowWhileIdle")
+  public ScheduleMode scheduleMode;
+
   public Long timeoutAfter;
   public String category;
   public int[] additionalFlags;
@@ -222,6 +230,10 @@ public class NotificationDetails implements Serializable {
       notificationDetails.repeatInterval =
           RepeatInterval.values()[(Integer) arguments.get(REPEAT_INTERVAL)];
     }
+    if (arguments.containsKey(REPEAT_INTERVAL_MILLISECONDS)) {
+      notificationDetails.repeatIntervalMilliseconds =
+          (Integer) arguments.get(REPEAT_INTERVAL_MILLISECONDS);
+    }
     if (arguments.containsKey(REPEAT_TIME)) {
       @SuppressWarnings("unchecked")
       Map<String, Object> repeatTimeParams = (Map<String, Object>) arguments.get(REPEAT_TIME);
@@ -243,6 +255,7 @@ public class NotificationDetails implements Serializable {
     if (platformChannelSpecifics != null) {
       notificationDetails.autoCancel = (Boolean) platformChannelSpecifics.get(AUTO_CANCEL);
       notificationDetails.ongoing = (Boolean) platformChannelSpecifics.get(ONGOING);
+      notificationDetails.silent = (Boolean) platformChannelSpecifics.get(SILENT);
       notificationDetails.style =
           NotificationStyle.values()[(Integer) platformChannelSpecifics.get(STYLE)];
       readStyleInformation(notificationDetails, platformChannelSpecifics);
@@ -268,7 +281,10 @@ public class NotificationDetails implements Serializable {
       readLargeIconInformation(notificationDetails, platformChannelSpecifics);
       notificationDetails.ticker = (String) platformChannelSpecifics.get(TICKER);
       notificationDetails.visibility = (Integer) platformChannelSpecifics.get(VISIBILITY);
-      notificationDetails.allowWhileIdle = (Boolean) platformChannelSpecifics.get(ALLOW_WHILE_IDLE);
+      if (platformChannelSpecifics.containsKey(SCHEDULE_MODE)) {
+        notificationDetails.scheduleMode =
+            ScheduleMode.valueOf((String) platformChannelSpecifics.get(SCHEDULE_MODE));
+      }
       notificationDetails.timeoutAfter =
           LongUtils.parseLong(platformChannelSpecifics.get(TIMEOUT_AFTER));
       notificationDetails.category = (String) platformChannelSpecifics.get(CATEGORY);
@@ -452,7 +468,7 @@ public class NotificationDetails implements Serializable {
         result.add(
             new MessageDetails(
                 (String) messageData.get(TEXT),
-                (Long) messageData.get(TIMESTAMP),
+                LongUtils.parseLong(messageData.get(TIMESTAMP)),
                 readPersonDetails((Map<String, Object>) messageData.get(PERSON)),
                 (String) messageData.get(DATA_MIME_TYPE),
                 (String) messageData.get(DATA_URI)));

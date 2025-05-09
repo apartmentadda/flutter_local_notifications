@@ -1,3 +1,22 @@
+
+## [7.2.0]
+
+* Added `periodicallyShowWithDuration()` and corresponding `validateRepeatDurationInterval()` helper method to ensure duration is at least a minute
+
+## [7.1.0]
+
+* [Android] `bigText` has added to `ActiveNotification` that allows getting information about the longer text associated with a notification displayed using the big text style. Thanks to the PR from [vulpeep](https://github.com/vulpeep)
+
+## [7.0.0+1]
+
+* Bumped maximum Dart SDK constraint
+
+## [7.0.0]
+
+* **Breaking change** the `id` property of the `ActiveNotification` class is now nullable to help indicate that the notification may not have been created by the plugin e.g. it was from Firebase Cloud Messaging. Thanks to the PR from [frankvollebregt](https://github.com/frankvollebregt)
+* Updated minimum Flutter SDK constraint to 3.0 and minimum Dart SDK constraint to 2.17 to align with versions used by actual plugin implementation
+* Bumped `mockito` dev dependency
+
 ## [6.0.0]
 
 * **Breaking change** the parameters of `ActiveNotification`'s constructor are now are named instead of positional
