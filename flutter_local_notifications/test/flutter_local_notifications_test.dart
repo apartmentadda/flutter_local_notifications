@@ -1,6 +1,5 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:flutter_local_notifications_platform_interface/flutter_local_notifications_platform_interface.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mockito/mockito.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
@@ -11,7 +10,7 @@ void main() {
       MockFlutterLocalNotificationsPlugin();
   FlutterLocalNotificationsPlatform.instance = mock;
 
-  test('Creates IOSNotificationAttachment when file path is specified', () {
+  test('Creates DarwinNotificationAttachment when file path is specified', () {
     expect(const DarwinNotificationAttachment(''),
         isA<DarwinNotificationAttachment>());
   });

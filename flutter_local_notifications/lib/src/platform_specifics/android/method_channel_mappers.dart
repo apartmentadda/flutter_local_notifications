@@ -45,6 +45,7 @@ extension AndroidNotificationChannelMapper on AndroidNotificationChannel {
         'groupId': groupId,
         'showBadge': showBadge,
         'importance': importance.value,
+        'bypassDnd': bypassDnd,
         'playSound': playSound,
         'enableVibration': enableVibration,
         'vibrationPattern': vibrationPattern,
@@ -53,6 +54,7 @@ extension AndroidNotificationChannelMapper on AndroidNotificationChannel {
         'ledColorRed': ledColor?.red,
         'ledColorGreen': ledColor?.green,
         'ledColorBlue': ledColor?.blue,
+        'audioAttributesUsage': audioAttributesUsage.value,
         'channelAction':
             AndroidNotificationChannelAction.createIfNotExists.index,
       }..addAll(_convertNotificationSoundToMap(sound));
@@ -179,6 +181,7 @@ extension AndroidNotificationDetailsMapper on AndroidNotificationDetails {
         'channelShowBadge': channelShowBadge,
         'channelAction': channelAction.index,
         'importance': importance.value,
+        'channelBypassDnd': channelBypassDnd,
         'priority': priority.value,
         'playSound': playSound,
         'enableVibration': enableVibration,
@@ -188,6 +191,7 @@ extension AndroidNotificationDetailsMapper on AndroidNotificationDetails {
         'groupAlertBehavior': groupAlertBehavior.index,
         'autoCancel': autoCancel,
         'ongoing': ongoing,
+        'silent': silent,
         'colorAlpha': color?.alpha,
         'colorRed': color?.red,
         'colorGreen': color?.green,

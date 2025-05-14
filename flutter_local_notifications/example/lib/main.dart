@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+// ignore: unnecessary_import
 import 'dart:typed_data';
 
 import 'package:device_info_plus/device_info_plus.dart';
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -16,18 +16,15 @@ import 'package:path_provider/path_provider.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 
-int id = 0;
-
-final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
-    FlutterLocalNotificationsPlugin();
+import 'padded_button.dart';
+import 'plugin.dart';
+import 'repeating.dart' as repeating;
+import 'windows.dart' as windows;
 
 /// Streams are created so that app can respond to notification-related events
-/// since the plugin is initialised in the `main` function
-final StreamController<ReceivedNotification> didReceiveLocalNotificationStream =
-    StreamController<ReceivedNotification>.broadcast();
-
-final StreamController<String?> selectNotificationStream =
-    StreamController<String?>.broadcast();
+/// since the plugin is initialized in the `main` function
+final StreamController<NotificationResponse> selectNotificationStream =
+    StreamController<NotificationResponse>.broadcast();
 
 const MethodChannel platform =
     MethodChannel('dexterx.dev/flutter_local_notifications_example');
@@ -40,12 +37,14 @@ class ReceivedNotification {
     required this.title,
     required this.body,
     required this.payload,
+    this.data,
   });
 
   final int id;
   final String? title;
   final String? body;
   final String? payload;
+  final Map<String, dynamic>? data;
 }
 
 String? selectedNotificationPayload;
@@ -85,17 +84,6 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await _configureLocalTimeZone();
-
-  final NotificationAppLaunchDetails? notificationAppLaunchDetails = !kIsWeb &&
-          Platform.isLinux
-      ? null
-      : await flutterLocalNotificationsPlugin.getNotificationAppLaunchDetails();
-  String initialRoute = HomePage.routeName;
-  if (notificationAppLaunchDetails?.didNotificationLaunchApp ?? false) {
-    selectedNotificationPayload =
-        notificationAppLaunchDetails!.notificationResponse?.payload;
-    initialRoute = SecondPage.routeName;
-  }
 
   const AndroidInitializationSettings initializationSettingsAndroid =
       AndroidInitializationSettings('app_icon');
@@ -152,47 +140,40 @@ Future<void> main() async {
     requestAlertPermission: false,
     requestBadgePermission: false,
     requestSoundPermission: false,
-    onDidReceiveLocalNotification:
-        (int id, String? title, String? body, String? payload) async {
-      didReceiveLocalNotificationStream.add(
-        ReceivedNotification(
-          id: id,
-          title: title,
-          body: body,
-          payload: payload,
-        ),
-      );
-    },
     notificationCategories: darwinNotificationCategories,
   );
+
   final LinuxInitializationSettings initializationSettingsLinux =
       LinuxInitializationSettings(
     defaultActionName: 'Open notification',
     defaultIcon: AssetsLinuxIcon('icons/app_icon.png'),
   );
+
   final InitializationSettings initializationSettings = InitializationSettings(
     android: initializationSettingsAndroid,
     iOS: initializationSettingsDarwin,
     macOS: initializationSettingsDarwin,
     linux: initializationSettingsLinux,
+    windows: windows.initSettings,
   );
+
   await flutterLocalNotificationsPlugin.initialize(
     initializationSettings,
-    onDidReceiveNotificationResponse:
-        (NotificationResponse notificationResponse) {
-      switch (notificationResponse.notificationResponseType) {
-        case NotificationResponseType.selectedNotification:
-          selectNotificationStream.add(notificationResponse.payload);
-          break;
-        case NotificationResponseType.selectedNotificationAction:
-          if (notificationResponse.actionId == navigationActionId) {
-            selectNotificationStream.add(notificationResponse.payload);
-          }
-          break;
-      }
-    },
+    onDidReceiveNotificationResponse: selectNotificationStream.add,
     onDidReceiveBackgroundNotificationResponse: notificationTapBackground,
   );
+
+  final NotificationAppLaunchDetails? notificationAppLaunchDetails = !kIsWeb &&
+          Platform.isLinux
+      ? null
+      : await flutterLocalNotificationsPlugin.getNotificationAppLaunchDetails();
+  String initialRoute = HomePage.routeName;
+  if (notificationAppLaunchDetails?.didNotificationLaunchApp ?? false) {
+    selectedNotificationPayload =
+        notificationAppLaunchDetails!.notificationResponse?.payload;
+    initialRoute = SecondPage.routeName;
+  }
+
   runApp(
     MaterialApp(
       initialRoute: initialRoute,
@@ -209,28 +190,11 @@ Future<void> _configureLocalTimeZone() async {
     return;
   }
   tz.initializeTimeZones();
+  if (Platform.isWindows) {
+    return;
+  }
   final String? timeZoneName = await FlutterTimezone.getLocalTimezone();
   tz.setLocalLocation(tz.getLocation(timeZoneName!));
-}
-
-class PaddedElevatedButton extends StatelessWidget {
-  const PaddedElevatedButton({
-    required this.buttonText,
-    required this.onPressed,
-    Key? key,
-  }) : super(key: key);
-
-  final String buttonText;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(0, 0, 0, 8),
-        child: ElevatedButton(
-          onPressed: onPressed,
-          child: Text(buttonText),
-        ),
-      );
 }
 
 class HomePage extends StatefulWidget {
@@ -261,7 +225,6 @@ class _HomePageState extends State<HomePage> {
     super.initState();
     _isAndroidPermissionGranted();
     _requestPermissions();
-    _configureDidReceiveLocalNotificationSubject();
     _configureSelectNotificationSubject();
   }
 
@@ -302,56 +265,56 @@ class _HomePageState extends State<HomePage> {
           flutterLocalNotificationsPlugin.resolvePlatformSpecificImplementation<
               AndroidFlutterLocalNotificationsPlugin>();
 
-      final bool? granted = await androidImplementation?.requestPermission();
+      final bool? grantedNotificationPermission =
+          await androidImplementation?.requestNotificationsPermission();
       setState(() {
-        _notificationsEnabled = granted ?? false;
+        _notificationsEnabled = grantedNotificationPermission ?? false;
       });
     }
   }
 
-  void _configureDidReceiveLocalNotificationSubject() {
-    didReceiveLocalNotificationStream.stream
-        .listen((ReceivedNotification receivedNotification) async {
-      await showDialog(
-        context: context,
-        builder: (BuildContext context) => CupertinoAlertDialog(
-          title: receivedNotification.title != null
-              ? Text(receivedNotification.title!)
-              : null,
-          content: receivedNotification.body != null
-              ? Text(receivedNotification.body!)
-              : null,
-          actions: <Widget>[
-            CupertinoDialogAction(
-              isDefaultAction: true,
-              onPressed: () async {
-                Navigator.of(context, rootNavigator: true).pop();
-                await Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (BuildContext context) =>
-                        SecondPage(receivedNotification.payload),
-                  ),
-                );
-              },
-              child: const Text('Ok'),
-            )
-          ],
-        ),
-      );
-    });
+  Future<void> _requestPermissionsWithCriticalAlert() async {
+    if (Platform.isIOS || Platform.isMacOS) {
+      await flutterLocalNotificationsPlugin
+          .resolvePlatformSpecificImplementation<
+              IOSFlutterLocalNotificationsPlugin>()
+          ?.requestPermissions(
+            alert: true,
+            badge: true,
+            sound: true,
+            critical: true,
+          );
+      await flutterLocalNotificationsPlugin
+          .resolvePlatformSpecificImplementation<
+              MacOSFlutterLocalNotificationsPlugin>()
+          ?.requestPermissions(
+            alert: true,
+            badge: true,
+            sound: true,
+            critical: true,
+          );
+    }
+  }
+
+  Future<void> _requestNotificationPolicyAccess() async {
+    final AndroidFlutterLocalNotificationsPlugin? androidImplementation =
+        flutterLocalNotificationsPlugin.resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+    await androidImplementation?.requestNotificationPolicyAccess();
   }
 
   void _configureSelectNotificationSubject() {
-    selectNotificationStream.stream.listen((String? payload) async {
+    selectNotificationStream.stream
+        .listen((NotificationResponse? response) async {
       await Navigator.of(context).push(MaterialPageRoute<void>(
-        builder: (BuildContext context) => SecondPage(payload),
+        builder: (BuildContext context) =>
+            SecondPage(response?.payload, data: response?.data),
       ));
     });
   }
 
   @override
   void dispose() {
-    didReceiveLocalNotificationStream.close();
     selectNotificationStream.close();
     super.dispose();
   }
@@ -434,41 +397,11 @@ class _HomePageState extends State<HomePage> {
                       },
                     ),
                     PaddedElevatedButton(
-                      buttonText: 'Repeat notification every minute',
-                      onPressed: () async {
-                        await _repeatNotification();
-                      },
-                    ),
-                    PaddedElevatedButton(
                       buttonText:
-                          'Schedule daily 10:00:00 am notification in your '
-                          'local time zone',
+                          'Schedule notification to appear in 5 seconds '
+                          'based on local time zone using alarm clock',
                       onPressed: () async {
-                        await _scheduleDailyTenAMNotification();
-                      },
-                    ),
-                    PaddedElevatedButton(
-                      buttonText:
-                          'Schedule daily 10:00:00 am notification in your '
-                          "local time zone using last year's date",
-                      onPressed: () async {
-                        await _scheduleDailyTenAMLastYearNotification();
-                      },
-                    ),
-                    PaddedElevatedButton(
-                      buttonText:
-                          'Schedule weekly 10:00:00 am notification in your '
-                          'local time zone',
-                      onPressed: () async {
-                        await _scheduleWeeklyTenAMNotification();
-                      },
-                    ),
-                    PaddedElevatedButton(
-                      buttonText:
-                          'Schedule weekly Monday 10:00:00 am notification '
-                          'in your local time zone',
-                      onPressed: () async {
-                        await _scheduleWeeklyMondayTenAMNotification();
+                        await _zonedScheduleAlarmClockNotification();
                       },
                     ),
                     PaddedElevatedButton(
@@ -485,25 +418,16 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ],
                   PaddedElevatedButton(
-                    buttonText:
-                        'Schedule monthly Monday 10:00:00 am notification in '
-                        'your local time zone',
-                    onPressed: () async {
-                      await _scheduleMonthlyMondayTenAMNotification();
-                    },
-                  ),
-                  PaddedElevatedButton(
-                    buttonText:
-                        'Schedule yearly Monday 10:00:00 am notification in '
-                        'your local time zone',
-                    onPressed: () async {
-                      await _scheduleYearlyMondayTenAMNotification();
-                    },
-                  ),
-                  PaddedElevatedButton(
-                    buttonText: 'Show notification with no sound',
+                    buttonText: 'Show notification from silent channel',
                     onPressed: () async {
                       await _showNotificationWithNoSound();
+                    },
+                  ),
+                  PaddedElevatedButton(
+                    buttonText:
+                        'Show silent notification from channel with sound',
+                    onPressed: () async {
+                      await _showNotificationSilently();
                     },
                   ),
                   PaddedElevatedButton(
@@ -518,6 +442,7 @@ class _HomePageState extends State<HomePage> {
                       await _cancelAllNotifications();
                     },
                   ),
+                  if (!Platform.isWindows) ...repeating.examples(context),
                   const Divider(),
                   const Text(
                     'Notifications with actions',
@@ -566,6 +491,10 @@ class _HomePageState extends State<HomePage> {
                     PaddedElevatedButton(
                       buttonText: 'Request permission (API 33+)',
                       onPressed: () => _requestPermissions(),
+                    ),
+                    PaddedElevatedButton(
+                      buttonText: 'Request notification policy access',
+                      onPressed: () => _requestNotificationPolicyAccess(),
                     ),
                     PaddedElevatedButton(
                       buttonText:
@@ -733,6 +662,13 @@ class _HomePageState extends State<HomePage> {
                       },
                     ),
                     PaddedElevatedButton(
+                      buttonText:
+                          'Request full-screen intent permission (API 34+)',
+                      onPressed: () async {
+                        await _requestFullScreenIntentPermission();
+                      },
+                    ),
+                    PaddedElevatedButton(
                       buttonText: 'Show full-screen notification',
                       onPressed: () async {
                         await _showFullScreenNotification();
@@ -778,6 +714,19 @@ class _HomePageState extends State<HomePage> {
                       },
                     ),
                     PaddedElevatedButton(
+                      buttonText:
+                          'Create notification channel that ignores dnd',
+                      onPressed: () async {
+                        await _createNotificationChannelWithDndBypass();
+                      },
+                    ),
+                    PaddedElevatedButton(
+                      buttonText: 'Show notification that ignores dnd',
+                      onPressed: () async {
+                        await _showNotificationWithDndBypass();
+                      },
+                    ),
+                    PaddedElevatedButton(
                       buttonText: 'Get notification channels',
                       onPressed: () async {
                         await _getNotificationChannels();
@@ -811,13 +760,28 @@ class _HomePageState extends State<HomePage> {
                       style: TextStyle(fontWeight: FontWeight.bold),
                     ),
                     PaddedElevatedButton(
+                      buttonText: 'Check permissions',
+                      onPressed: _checkNotificationsOnCupertino,
+                    ),
+                    PaddedElevatedButton(
                       buttonText: 'Request permission',
                       onPressed: _requestPermissions,
+                    ),
+                    PaddedElevatedButton(
+                      buttonText:
+                          'Request permission with critical alert permission',
+                      onPressed: _requestPermissionsWithCriticalAlert,
                     ),
                     PaddedElevatedButton(
                       buttonText: 'Show notification with subtitle',
                       onPressed: () async {
                         await _showNotificationWithSubtitle();
+                      },
+                    ),
+                    PaddedElevatedButton(
+                      buttonText: 'Show notification with critical sound',
+                      onPressed: () async {
+                        await _showNotificationWithCriticalSound();
                       },
                     ),
                     PaddedElevatedButton(
@@ -863,6 +827,20 @@ class _HomePageState extends State<HomePage> {
                         await _showNotificationWithTimeSensitiveInterruptionLevel();
                       },
                     ),
+                    PaddedElevatedButton(
+                      buttonText: 'Show notification with banner but not in '
+                          'notification centre',
+                      onPressed: () async {
+                        await _showNotificationWithBannerNotInNotificationCentre();
+                      },
+                    ),
+                    PaddedElevatedButton(
+                      buttonText:
+                          'Show notification in notification centre only',
+                      onPressed: () async {
+                        await _showNotificationInNotificationCentreOnly();
+                      },
+                    ),
                   ],
                   if (!kIsWeb && Platform.isLinux) ...<Widget>[
                     const Text(
@@ -886,7 +864,7 @@ class _HomePageState extends State<HomePage> {
                                   'Capabilities of the current system:',
                                   style: Theme.of(context)
                                       .textTheme
-                                      .subtitle1!
+                                      .titleMedium!
                                       .copyWith(fontWeight: FontWeight.bold),
                                 ),
                                 const SizedBox(height: 8),
@@ -1043,6 +1021,7 @@ class _HomePageState extends State<HomePage> {
                       },
                     ),
                   ],
+                  if (!kIsWeb && Platform.isWindows) ...windows.examples(),
                 ],
               ),
             ),
@@ -1122,11 +1101,33 @@ class _HomePageState extends State<HomePage> {
       ],
     );
 
-    const NotificationDetails notificationDetails = NotificationDetails(
+    final WindowsNotificationDetails windowsNotificationsDetails =
+        WindowsNotificationDetails(
+      subtitle: 'Click the three dots for another button',
+      actions: <WindowsAction>[
+        const WindowsAction(
+          content: 'Text',
+          arguments: 'text',
+        ),
+        WindowsAction(
+          content: 'Image',
+          arguments: 'image',
+          imageUri: WindowsImage.getAssetUri('icons/coworker.png'),
+        ),
+        const WindowsAction(
+          content: 'Context',
+          arguments: 'context',
+          placement: WindowsActionPlacement.contextMenu,
+        ),
+      ],
+    );
+
+    final NotificationDetails notificationDetails = NotificationDetails(
       android: androidNotificationDetails,
       iOS: iosNotificationDetails,
       macOS: macOSNotificationDetails,
       linux: linuxNotificationDetails,
+      windows: windowsNotificationsDetails,
     );
     await flutterLocalNotificationsPlugin.show(
         id++, 'plain title', 'plain body', notificationDetails,
@@ -1161,10 +1162,23 @@ class _HomePageState extends State<HomePage> {
       categoryIdentifier: darwinNotificationCategoryText,
     );
 
+    const WindowsNotificationDetails windowsNotificationDetails =
+        WindowsNotificationDetails(
+      actions: <WindowsAction>[
+        WindowsAction(
+            content: 'Send', arguments: 'send-reply', inputId: 'text'),
+      ],
+      inputs: <WindowsTextInput>[
+        WindowsTextInput(
+            id: 'text', title: 'Send a reply?', placeHolderContent: 'Message'),
+      ],
+    );
+
     const NotificationDetails notificationDetails = NotificationDetails(
       android: androidNotificationDetails,
       iOS: darwinNotificationDetails,
       macOS: darwinNotificationDetails,
+      windows: windowsNotificationDetails,
     );
 
     await flutterLocalNotificationsPlugin.show(id++, 'Text Input Notification',
@@ -1221,14 +1235,55 @@ class _HomePageState extends State<HomePage> {
       categoryIdentifier: darwinNotificationCategoryText,
     );
 
+    const WindowsNotificationDetails windowsNotificationDetails =
+        WindowsNotificationDetails(
+      actions: <WindowsAction>[
+        WindowsAction(
+            content: 'Submit', arguments: 'submit', inputId: 'choice'),
+      ],
+      inputs: <WindowsInput>[
+        WindowsSelectionInput(
+          id: 'choice',
+          defaultItem: 'abc',
+          items: <WindowsSelection>[
+            WindowsSelection(id: 'abc', content: 'abc'),
+            WindowsSelection(id: 'def', content: 'def'),
+          ],
+        ),
+      ],
+    );
+
     const NotificationDetails notificationDetails = NotificationDetails(
       android: androidNotificationDetails,
       iOS: darwinNotificationDetails,
       macOS: darwinNotificationDetails,
+      windows: windowsNotificationDetails,
     );
     await flutterLocalNotificationsPlugin.show(
         id++, 'plain title', 'plain body', notificationDetails,
         payload: 'item x');
+  }
+
+  Future<void> _requestFullScreenIntentPermission() async {
+    final bool permissionGranted = await flutterLocalNotificationsPlugin
+            .resolvePlatformSpecificImplementation<
+                AndroidFlutterLocalNotificationsPlugin>()
+            ?.requestFullScreenIntentPermission() ??
+        false;
+    await showDialog<void>(
+        context: context,
+        builder: (BuildContext context) => AlertDialog(
+              content: Text(
+                  'Full screen intent permission granted: $permissionGranted'),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                  },
+                  child: const Text('OK'),
+                ),
+              ],
+            ));
   }
 
   Future<void> _showFullScreenNotification() async {
@@ -1238,7 +1293,8 @@ class _HomePageState extends State<HomePage> {
         title: const Text('Turn off your screen'),
         content: const Text(
             'to see the full-screen intent in 5 seconds, press OK and TURN '
-            'OFF your screen'),
+            'OFF your screen. Note that the full-screen intent permission must '
+            'be granted for this to work too'),
         actions: <Widget>[
           TextButton(
             onPressed: () {
@@ -1260,9 +1316,7 @@ class _HomePageState extends State<HomePage> {
                           priority: Priority.high,
                           importance: Importance.high,
                           fullScreenIntent: true)),
-                  androidAllowWhileIdle: true,
-                  uiLocalNotificationDateInterpretation:
-                      UILocalNotificationDateInterpretation.absoluteTime);
+                  androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle);
 
               Navigator.pop(context);
             },
@@ -1319,16 +1373,26 @@ class _HomePageState extends State<HomePage> {
       sound: RawResourceAndroidNotificationSound('slow_spring_board'),
     );
     const DarwinNotificationDetails darwinNotificationDetails =
-        DarwinNotificationDetails(sound: 'slow_spring_board.aiff');
+        DarwinNotificationDetails(
+      sound: 'slow_spring_board.aiff',
+    );
     final LinuxNotificationDetails linuxPlatformChannelSpecifics =
         LinuxNotificationDetails(
       sound: AssetsLinuxSound('sound/slow_spring_board.mp3'),
+    );
+    final WindowsNotificationDetails windowsNotificationDetails =
+        WindowsNotificationDetails(
+      audio: WindowsNotificationAudio.asset(
+        'sound/slow_spring_board.mp3',
+        fallback: WindowsNotificationSound.alarm5,
+      ),
     );
     final NotificationDetails notificationDetails = NotificationDetails(
       android: androidNotificationDetails,
       iOS: darwinNotificationDetails,
       macOS: darwinNotificationDetails,
       linux: linuxPlatformChannelSpecifics,
+      windows: windowsNotificationDetails,
     );
     await flutterLocalNotificationsPlugin.show(
       id++,
@@ -1377,9 +1441,20 @@ class _HomePageState extends State<HomePage> {
             android: AndroidNotificationDetails(
                 'your channel id', 'your channel name',
                 channelDescription: 'your channel description')),
-        androidAllowWhileIdle: true,
-        uiLocalNotificationDateInterpretation:
-            UILocalNotificationDateInterpretation.absoluteTime);
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle);
+  }
+
+  Future<void> _zonedScheduleAlarmClockNotification() async {
+    await flutterLocalNotificationsPlugin.zonedSchedule(
+        123,
+        'scheduled alarm clock title',
+        'scheduled alarm clock body',
+        tz.TZDateTime.now(tz.local).add(const Duration(seconds: 5)),
+        const NotificationDetails(
+            android: AndroidNotificationDetails(
+                'alarm_clock_channel', 'Alarm Clock Channel',
+                channelDescription: 'Alarm Clock Notification')),
+        androidScheduleMode: AndroidScheduleMode.alarmClock);
   }
 
   Future<void> _showNotificationWithNoSound() async {
@@ -1389,8 +1464,36 @@ class _HomePageState extends State<HomePage> {
             playSound: false,
             styleInformation: DefaultStyleInformation(true, true));
     const DarwinNotificationDetails darwinNotificationDetails =
-        DarwinNotificationDetails(presentSound: false);
-    const NotificationDetails notificationDetails = NotificationDetails(
+        DarwinNotificationDetails(
+      presentSound: false,
+    );
+    final WindowsNotificationDetails windowsDetails =
+        WindowsNotificationDetails(audio: WindowsNotificationAudio.silent());
+    final NotificationDetails notificationDetails = NotificationDetails(
+        windows: windowsDetails,
+        android: androidNotificationDetails,
+        iOS: darwinNotificationDetails,
+        macOS: darwinNotificationDetails);
+    await flutterLocalNotificationsPlugin.show(
+        id++, '<b>silent</b> title', '<b>silent</b> body', notificationDetails);
+  }
+
+  Future<void> _showNotificationSilently() async {
+    const AndroidNotificationDetails androidNotificationDetails =
+        AndroidNotificationDetails('your channel id', 'your channel name',
+            channelDescription: 'your channel description',
+            importance: Importance.max,
+            priority: Priority.high,
+            ticker: 'ticker',
+            silent: true);
+    const DarwinNotificationDetails darwinNotificationDetails =
+        DarwinNotificationDetails(
+      presentSound: false,
+    );
+    final WindowsNotificationDetails windowsDetails =
+        WindowsNotificationDetails(audio: WindowsNotificationAudio.silent());
+    final NotificationDetails notificationDetails = NotificationDetails(
+        windows: windowsDetails,
         android: androidNotificationDetails,
         iOS: darwinNotificationDetails,
         macOS: darwinNotificationDetails);
@@ -1683,7 +1786,7 @@ class _HomePageState extends State<HomePage> {
     final NotificationDetails notificationDetails =
         NotificationDetails(android: androidNotificationDetails);
     await flutterLocalNotificationsPlugin.show(
-        id++, 'message title', 'message body', notificationDetails);
+        id, 'message title', 'message body', notificationDetails);
 
     // wait 10 seconds and add another message to simulate another response
     await Future<void>.delayed(const Duration(seconds: 10), () async {
@@ -1805,148 +1908,6 @@ class _HomePageState extends State<HomePage> {
         notificationDetails);
   }
 
-  Future<void> _repeatNotification() async {
-    const AndroidNotificationDetails androidNotificationDetails =
-        AndroidNotificationDetails(
-            'repeating channel id', 'repeating channel name',
-            channelDescription: 'repeating description');
-    const NotificationDetails notificationDetails =
-        NotificationDetails(android: androidNotificationDetails);
-    await flutterLocalNotificationsPlugin.periodicallyShow(
-        id++,
-        'repeating title',
-        'repeating body',
-        RepeatInterval.everyMinute,
-        notificationDetails,
-        androidAllowWhileIdle: true);
-  }
-
-  Future<void> _scheduleDailyTenAMNotification() async {
-    await flutterLocalNotificationsPlugin.zonedSchedule(
-        0,
-        'daily scheduled notification title',
-        'daily scheduled notification body',
-        _nextInstanceOfTenAM(),
-        const NotificationDetails(
-          android: AndroidNotificationDetails('daily notification channel id',
-              'daily notification channel name',
-              channelDescription: 'daily notification description'),
-        ),
-        androidAllowWhileIdle: true,
-        uiLocalNotificationDateInterpretation:
-            UILocalNotificationDateInterpretation.absoluteTime,
-        matchDateTimeComponents: DateTimeComponents.time);
-  }
-
-  /// To test we don't validate past dates when using `matchDateTimeComponents`
-  Future<void> _scheduleDailyTenAMLastYearNotification() async {
-    await flutterLocalNotificationsPlugin.zonedSchedule(
-        0,
-        'daily scheduled notification title',
-        'daily scheduled notification body',
-        _nextInstanceOfTenAMLastYear(),
-        const NotificationDetails(
-          android: AndroidNotificationDetails('daily notification channel id',
-              'daily notification channel name',
-              channelDescription: 'daily notification description'),
-        ),
-        androidAllowWhileIdle: true,
-        uiLocalNotificationDateInterpretation:
-            UILocalNotificationDateInterpretation.absoluteTime,
-        matchDateTimeComponents: DateTimeComponents.time);
-  }
-
-  Future<void> _scheduleWeeklyTenAMNotification() async {
-    await flutterLocalNotificationsPlugin.zonedSchedule(
-        0,
-        'weekly scheduled notification title',
-        'weekly scheduled notification body',
-        _nextInstanceOfTenAM(),
-        const NotificationDetails(
-          android: AndroidNotificationDetails('weekly notification channel id',
-              'weekly notification channel name',
-              channelDescription: 'weekly notificationdescription'),
-        ),
-        androidAllowWhileIdle: true,
-        uiLocalNotificationDateInterpretation:
-            UILocalNotificationDateInterpretation.absoluteTime,
-        matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime);
-  }
-
-  Future<void> _scheduleWeeklyMondayTenAMNotification() async {
-    await flutterLocalNotificationsPlugin.zonedSchedule(
-        0,
-        'weekly scheduled notification title',
-        'weekly scheduled notification body',
-        _nextInstanceOfMondayTenAM(),
-        const NotificationDetails(
-          android: AndroidNotificationDetails('weekly notification channel id',
-              'weekly notification channel name',
-              channelDescription: 'weekly notificationdescription'),
-        ),
-        androidAllowWhileIdle: true,
-        uiLocalNotificationDateInterpretation:
-            UILocalNotificationDateInterpretation.absoluteTime,
-        matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime);
-  }
-
-  Future<void> _scheduleMonthlyMondayTenAMNotification() async {
-    await flutterLocalNotificationsPlugin.zonedSchedule(
-        0,
-        'monthly scheduled notification title',
-        'monthly scheduled notification body',
-        _nextInstanceOfMondayTenAM(),
-        const NotificationDetails(
-          android: AndroidNotificationDetails('monthly notification channel id',
-              'monthly notification channel name',
-              channelDescription: 'monthly notificationdescription'),
-        ),
-        androidAllowWhileIdle: true,
-        uiLocalNotificationDateInterpretation:
-            UILocalNotificationDateInterpretation.absoluteTime,
-        matchDateTimeComponents: DateTimeComponents.dayOfMonthAndTime);
-  }
-
-  Future<void> _scheduleYearlyMondayTenAMNotification() async {
-    await flutterLocalNotificationsPlugin.zonedSchedule(
-        0,
-        'yearly scheduled notification title',
-        'yearly scheduled notification body',
-        _nextInstanceOfMondayTenAM(),
-        const NotificationDetails(
-          android: AndroidNotificationDetails('yearly notification channel id',
-              'yearly notification channel name',
-              channelDescription: 'yearly notification description'),
-        ),
-        androidAllowWhileIdle: true,
-        uiLocalNotificationDateInterpretation:
-            UILocalNotificationDateInterpretation.absoluteTime,
-        matchDateTimeComponents: DateTimeComponents.dateAndTime);
-  }
-
-  tz.TZDateTime _nextInstanceOfTenAM() {
-    final tz.TZDateTime now = tz.TZDateTime.now(tz.local);
-    tz.TZDateTime scheduledDate =
-        tz.TZDateTime(tz.local, now.year, now.month, now.day, 10);
-    if (scheduledDate.isBefore(now)) {
-      scheduledDate = scheduledDate.add(const Duration(days: 1));
-    }
-    return scheduledDate;
-  }
-
-  tz.TZDateTime _nextInstanceOfTenAMLastYear() {
-    final tz.TZDateTime now = tz.TZDateTime.now(tz.local);
-    return tz.TZDateTime(tz.local, now.year - 1, now.month, now.day, 10);
-  }
-
-  tz.TZDateTime _nextInstanceOfMondayTenAM() {
-    tz.TZDateTime scheduledDate = _nextInstanceOfTenAM();
-    while (scheduledDate.weekday != DateTime.monday) {
-      scheduledDate = scheduledDate.add(const Duration(days: 1));
-    }
-    return scheduledDate;
-  }
-
   Future<void> _showNotificationWithNoBadge() async {
     const AndroidNotificationDetails androidNotificationDetails =
         AndroidNotificationDetails('no badge channel', 'no badge name',
@@ -2048,7 +2009,9 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _showNotificationWithSubtitle() async {
     const DarwinNotificationDetails darwinNotificationDetails =
-        DarwinNotificationDetails(subtitle: 'the subtitle');
+        DarwinNotificationDetails(
+      subtitle: 'the subtitle',
+    );
     const NotificationDetails notificationDetails = NotificationDetails(
         iOS: darwinNotificationDetails, macOS: darwinNotificationDetails);
     await flutterLocalNotificationsPlugin.show(
@@ -2074,7 +2037,9 @@ class _HomePageState extends State<HomePage> {
       String threadIdentifier,
     ) {
       final DarwinNotificationDetails darwinNotificationDetails =
-          DarwinNotificationDetails(threadIdentifier: threadIdentifier);
+          DarwinNotificationDetails(
+        threadIdentifier: threadIdentifier,
+      );
       return NotificationDetails(
           iOS: darwinNotificationDetails, macOS: darwinNotificationDetails);
     }
@@ -2102,13 +2067,46 @@ class _HomePageState extends State<HomePage> {
   Future<void> _showNotificationWithTimeSensitiveInterruptionLevel() async {
     const DarwinNotificationDetails darwinNotificationDetails =
         DarwinNotificationDetails(
-            interruptionLevel: InterruptionLevel.timeSensitive);
+      interruptionLevel: InterruptionLevel.timeSensitive,
+    );
     const NotificationDetails notificationDetails = NotificationDetails(
         iOS: darwinNotificationDetails, macOS: darwinNotificationDetails);
     await flutterLocalNotificationsPlugin.show(
         id++,
         'title of time sensitive notification',
         'body of time sensitive notification',
+        notificationDetails,
+        payload: 'item x');
+  }
+
+  Future<void> _showNotificationWithBannerNotInNotificationCentre() async {
+    const DarwinNotificationDetails darwinNotificationDetails =
+        DarwinNotificationDetails(
+      presentBanner: true,
+      presentList: false,
+    );
+    const NotificationDetails notificationDetails = NotificationDetails(
+        iOS: darwinNotificationDetails, macOS: darwinNotificationDetails);
+    await flutterLocalNotificationsPlugin.show(
+        id++,
+        'title of banner notification',
+        'body of banner notification',
+        notificationDetails,
+        payload: 'item x');
+  }
+
+  Future<void> _showNotificationInNotificationCentreOnly() async {
+    const DarwinNotificationDetails darwinNotificationDetails =
+        DarwinNotificationDetails(
+      presentBanner: false,
+      presentList: true,
+    );
+    const NotificationDetails notificationDetails = NotificationDetails(
+        iOS: darwinNotificationDetails, macOS: darwinNotificationDetails);
+    await flutterLocalNotificationsPlugin.show(
+        id++,
+        'title of notification shown only in notification centre',
+        'body of notification shown only in notification centre',
         notificationDetails,
         payload: 'item x');
   }
@@ -2187,12 +2185,14 @@ class _HomePageState extends State<HomePage> {
     final String bigPicturePath = await _downloadAndSaveFile(
         'https://dummyimage.com/600x200', 'bigPicture.jpg');
     final DarwinNotificationDetails darwinNotificationDetails =
-        DarwinNotificationDetails(attachments: <DarwinNotificationAttachment>[
-      DarwinNotificationAttachment(
-        bigPicturePath,
-        hideThumbnail: hideThumbnail,
-      )
-    ]);
+        DarwinNotificationDetails(
+      attachments: <DarwinNotificationAttachment>[
+        DarwinNotificationAttachment(
+          bigPicturePath,
+          hideThumbnail: hideThumbnail,
+        )
+      ],
+    );
     final NotificationDetails notificationDetails = NotificationDetails(
         iOS: darwinNotificationDetails, macOS: darwinNotificationDetails);
     await flutterLocalNotificationsPlugin.show(
@@ -2206,19 +2206,21 @@ class _HomePageState extends State<HomePage> {
     final String bigPicturePath = await _downloadAndSaveFile(
         'https://dummyimage.com/600x200', 'bigPicture.jpg');
     final DarwinNotificationDetails darwinNotificationDetails =
-        DarwinNotificationDetails(attachments: <DarwinNotificationAttachment>[
-      DarwinNotificationAttachment(
-        bigPicturePath,
-        thumbnailClippingRect:
-            // lower right quadrant of the attachment
-            const DarwinNotificationAttachmentThumbnailClippingRect(
-          x: 0.5,
-          y: 0.5,
-          height: 0.5,
-          width: 0.5,
-        ),
-      )
-    ]);
+        DarwinNotificationDetails(
+      attachments: <DarwinNotificationAttachment>[
+        DarwinNotificationAttachment(
+          bigPicturePath,
+          thumbnailClippingRect:
+              // lower right quadrant of the attachment
+              const DarwinNotificationAttachmentThumbnailClippingRect(
+            x: 0.5,
+            y: 0.5,
+            height: 0.5,
+            width: 0.5,
+          ),
+        )
+      ],
+    );
     final NotificationDetails notificationDetails = NotificationDetails(
         iOS: darwinNotificationDetails, macOS: darwinNotificationDetails);
     await flutterLocalNotificationsPlugin.show(
@@ -2369,6 +2371,57 @@ class _HomePageState extends State<HomePage> {
             ));
   }
 
+  Future<void> _createNotificationChannelWithDndBypass() async {
+    const AndroidNotificationChannel androidNotificationChannel =
+        AndroidNotificationChannel('your channel id 3', 'your channel name 3',
+            description: 'your channel description 3',
+            bypassDnd: true,
+            importance: Importance.max);
+
+    final AndroidFlutterLocalNotificationsPlugin? androidPlugin =
+        flutterLocalNotificationsPlugin.resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+
+    final bool? hasPolicyAccess =
+        await androidPlugin?.hasNotificationPolicyAccess();
+    if (hasPolicyAccess ?? false) {
+      await androidPlugin?.requestNotificationPolicyAccess();
+    }
+
+    await androidPlugin?.createNotificationChannel(androidNotificationChannel);
+
+    await showDialog(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        content: Text(
+            'Channel with name ${androidNotificationChannel.name} created'),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          )
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showNotificationWithDndBypass() async {
+    const AndroidNotificationDetails androidNotificationDetails =
+        AndroidNotificationDetails('your channel id 3', 'your channel name 3',
+            channelDescription: 'your channel description 3',
+            channelBypassDnd: true,
+            importance: Importance.max);
+    const NotificationDetails notificationDetails =
+        NotificationDetails(android: androidNotificationDetails);
+
+    await flutterLocalNotificationsPlugin.show(
+      id++,
+      'I ignored dnd',
+      'I completely ignored dnd',
+      notificationDetails,
+    );
+  }
+
   Future<void> _areNotifcationsEnabledOnAndroid() async {
     final bool? areEnabled = await flutterLocalNotificationsPlugin
         .resolvePlatformSpecificImplementation<
@@ -2382,6 +2435,41 @@ class _HomePageState extends State<HomePage> {
                   : (areEnabled
                       ? 'Notifications are enabled'
                       : 'Notifications are NOT enabled')),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                  },
+                  child: const Text('OK'),
+                ),
+              ],
+            ));
+  }
+
+  Future<void> _checkNotificationsOnCupertino() async {
+    final NotificationsEnabledOptions? isEnabled =
+        await flutterLocalNotificationsPlugin
+                .resolvePlatformSpecificImplementation<
+                    IOSFlutterLocalNotificationsPlugin>()
+                ?.checkPermissions() ??
+            await flutterLocalNotificationsPlugin
+                .resolvePlatformSpecificImplementation<
+                    MacOSFlutterLocalNotificationsPlugin>()
+                ?.checkPermissions();
+    final String isEnabledString = isEnabled == null
+        ? 'ERROR: received null'
+        : '''
+    isEnabled: ${isEnabled.isEnabled}
+    isSoundEnabled: ${isEnabled.isSoundEnabled}
+    isAlertEnabled: ${isEnabled.isAlertEnabled}
+    isBadgeEnabled: ${isEnabled.isBadgeEnabled}
+    isProvisionalEnabled: ${isEnabled.isProvisionalEnabled}
+    isCriticalEnabled: ${isEnabled.isCriticalEnabled}
+    ''';
+    await showDialog<void>(
+        context: context,
+        builder: (BuildContext context) => AlertDialog(
+              content: Text(isEnabledString),
               actions: <Widget>[
                 TextButton(
                   onPressed: () {
@@ -2447,7 +2535,7 @@ class _HomePageState extends State<HomePage> {
     } else if (Platform.isIOS) {
       final DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
       final IosDeviceInfo iosInfo = await deviceInfo.iosInfo;
-      final List<String> fullVersion = iosInfo.systemVersion!.split('.');
+      final List<String> fullVersion = iosInfo.systemVersion.split('.');
       if (fullVersion.isNotEmpty) {
         final int? version = int.tryParse(fullVersion[0]);
         if (version != null && version < 10) {
@@ -2474,7 +2562,8 @@ class _HomePageState extends State<HomePage> {
           if (activeNotifications!.isEmpty)
             const Text('No active notifications'),
           if (activeNotifications.isNotEmpty)
-            for (ActiveNotification activeNotification in activeNotifications)
+            for (final ActiveNotification activeNotification
+                in activeNotifications)
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
@@ -2486,13 +2575,17 @@ class _HomePageState extends State<HomePage> {
                     'title: ${activeNotification.title}\n'
                     'body: ${activeNotification.body}',
                   ),
-                  TextButton(
-                    child: const Text('Get messaging style'),
-                    onPressed: () {
-                      _getActiveNotificationMessagingStyle(
-                          activeNotification.id, activeNotification.tag);
-                    },
-                  ),
+                  if (Platform.isAndroid &&
+                      activeNotification.id != null) ...<Widget>[
+                    Text('bigText: ${activeNotification.bigText}'),
+                    TextButton(
+                      child: const Text('Get messaging style'),
+                      onPressed: () {
+                        _getActiveNotificationMessagingStyle(
+                            activeNotification.id!, activeNotification.tag);
+                      },
+                    ),
+                  ],
                   const Divider(color: Colors.black),
                 ],
               ),
@@ -2646,7 +2739,7 @@ class _HomePageState extends State<HomePage> {
             if (channels?.isEmpty ?? true)
               const Text('No notification channels')
             else
-              for (AndroidNotificationChannel channel in channels!)
+              for (final AndroidNotificationChannel channel in channels!)
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
@@ -2655,13 +2748,15 @@ class _HomePageState extends State<HomePage> {
                         'description: ${channel.description}\n'
                         'groupId: ${channel.groupId}\n'
                         'importance: ${channel.importance.value}\n'
+                        'bypassDnd: ${channel.bypassDnd}\n'
                         'playSound: ${channel.playSound}\n'
                         'sound: ${channel.sound?.sound}\n'
                         'enableVibration: ${channel.enableVibration}\n'
                         'vibrationPattern: ${channel.vibrationPattern}\n'
                         'showBadge: ${channel.showBadge}\n'
                         'enableLights: ${channel.enableLights}\n'
-                        'ledColor: ${channel.ledColor}\n'),
+                        'ledColor: ${channel.ledColor}\n'
+                        'audioAttributesUsage: ${channel.audioAttributesUsage}\n'),
                     const Divider(color: Colors.black),
                   ],
                 ),
@@ -2710,6 +2805,26 @@ class _HomePageState extends State<HomePage> {
       platformChannelSpecifics,
     );
   }
+
+  Future<void> _showNotificationWithCriticalSound() async {
+    const DarwinNotificationDetails darwinNotificationDetails =
+        DarwinNotificationDetails(
+      // Between 0.0 and 1.0
+      criticalSoundVolume: 0.5,
+      // If sound is not specified, the default sound will be used
+      sound: 'slow_spring_board.aiff',
+    );
+    const NotificationDetails notificationDetails = NotificationDetails(
+      iOS: darwinNotificationDetails,
+      macOS: darwinNotificationDetails,
+    );
+    await flutterLocalNotificationsPlugin.show(
+      id++,
+      'Critical sound notification title',
+      'Critical sound notification body',
+      notificationDetails,
+    );
+  }
 }
 
 Future<void> _showLinuxNotificationWithBodyMarkup() async {
@@ -2746,7 +2861,7 @@ Future<void> _showLinuxNotificationWithByteDataIcon() async {
     'icons/app_icon_density.png',
   );
   final image.Image? iconData = image.decodePng(
-    assetIcon.buffer.asUint8List().toList(),
+    assetIcon.buffer.asUint8List(),
   );
   final Uint8List iconBytes = iconData!.getBytes();
   final LinuxNotificationDetails linuxPlatformChannelSpecifics =
@@ -2756,7 +2871,8 @@ Future<void> _showLinuxNotificationWithByteDataIcon() async {
         data: iconBytes,
         width: iconData.width,
         height: iconData.height,
-        channels: 4, // The icon has an alpha channel
+        channels: 4,
+        // The icon has an alpha channel
         hasAlpha: true,
       ),
     ),
@@ -2923,12 +3039,14 @@ Future<LinuxServerCapabilities> getLinuxCapabilities() =>
 class SecondPage extends StatefulWidget {
   const SecondPage(
     this.payload, {
+    this.data,
     Key? key,
   }) : super(key: key);
 
   static const String routeName = '/secondPage';
 
   final String? payload;
+  final Map<String, dynamic>? data;
 
   @override
   State<StatefulWidget> createState() => SecondPageState();
@@ -2936,11 +3054,13 @@ class SecondPage extends StatefulWidget {
 
 class SecondPageState extends State<SecondPage> {
   String? _payload;
+  Map<String, dynamic>? _data;
 
   @override
   void initState() {
     super.initState();
     _payload = widget.payload;
+    _data = widget.data;
   }
 
   @override
@@ -2953,6 +3073,7 @@ class SecondPageState extends State<SecondPage> {
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
               Text('payload ${_payload ?? ''}'),
+              Text('data ${_data ?? ''}'),
               ElevatedButton(
                 onPressed: () {
                   Navigator.pop(context);

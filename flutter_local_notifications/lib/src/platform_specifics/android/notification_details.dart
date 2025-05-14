@@ -2,7 +2,6 @@ import 'dart:typed_data';
 import 'dart:ui';
 
 import 'bitmap.dart';
-import 'categories.dart';
 import 'enums.dart';
 import 'notification_sound.dart';
 import 'styles/style_information.dart';
@@ -105,6 +104,7 @@ class AndroidNotificationDetails {
     this.channelDescription,
     this.icon,
     this.importance = Importance.defaultImportance,
+    this.channelBypassDnd = false,
     this.priority = Priority.defaultPriority,
     this.styleInformation,
     this.playSound = true,
@@ -116,6 +116,7 @@ class AndroidNotificationDetails {
     this.groupAlertBehavior = GroupAlertBehavior.all,
     this.autoCancel = true,
     this.ongoing = false,
+    this.silent = false,
     this.color,
     this.largeIcon,
     this.onlyAlertOnce = false,
@@ -171,11 +172,19 @@ class AndroidNotificationDetails {
   final String? channelDescription;
 
   /// Whether notifications posted to this channel can appear as application
-  /// icon badges in a Launcher
+  /// icon badges in a Launcher.
   final bool channelShowBadge;
 
   /// The importance of the notification.
   final Importance importance;
+
+  /// Whether the notification channel should attempt to bypass Do Not Disturb
+  /// settings.
+  ///
+  /// You must acquire notification policy access by calling
+  /// [AndroidFlutterLocalNotificationsPlugin.requestNotificationPolicyAccess]
+  /// before setting this to true. Otherwise this value is ignored.
+  final bool channelBypassDnd;
 
   /// The priority of the notification
   final Priority priority;
@@ -241,6 +250,9 @@ class AndroidNotificationDetails {
 
   /// Specifies if the notification will be "ongoing".
   final bool ongoing;
+
+  /// Specifies if the notification will be "silent".
+  final bool silent;
 
   /// Specifies the color.
   final Color? color;
@@ -315,7 +327,7 @@ class AndroidNotificationDetails {
   /// The action to take for managing notification channels.
   ///
   /// Defaults to creating the notification channel using the provided details
-  /// if it doesn't exist
+  /// if it doesn't exist.
   final AndroidNotificationChannelAction channelAction;
 
   /// Defines the notification visibility on the lockscreen.
@@ -332,8 +344,9 @@ class AndroidNotificationDetails {
   /// soon as it triggers.
   ///
   /// Note: The system UI may choose to display a heads-up notification,
-  /// instead of launching your full-screen intent, while the user is using the
-  /// device. When the full-screen intent occurs, the plugin will act as though
+  /// instead of launching your full-screen intent. This can occur while the
+  /// user is using the device or due the full-screen intent not being granted.
+  /// When the full-screen intent occurs, the plugin will act as though
   /// the user has tapped on a notification so handle it the same way
   /// (e.g. via `onSelectNotification` callback) to display the appropriate
   /// page for your application.
@@ -406,7 +419,7 @@ class AndroidNotificationDetails {
   final int? number;
 
   /// The attribute describing what is the intended use of the audio signal,
-  /// such as alarm or ringtone set in [`AudioAttributes.Builder`](https://developer.android.com/reference/android/media/AudioAttributes.Builder#setUsage(int))
+  /// such as alarm or ringtone set in [`AudioAttributes.Builder`](https://developer.android.com/reference/android/media/AudioAttributes.Builder#setUsage(int)).
   /// https://developer.android.com/reference/android/media/AudioAttributes
   final AudioAttributesUsage audioAttributesUsage;
 }

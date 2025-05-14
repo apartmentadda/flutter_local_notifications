@@ -9,3 +9,21 @@ Please ensure that no analysis issues are found and all tests continue to pass a
 Most of the tests are around verifying the details sent via the platform channel.
 
 For API docs, please try to adhere to the effective Dart documentation guidelines that can be found [here](https://dart.dev/guides/language/effective-dart/documentation).
+
+## Environment setup
+
+`flutter_local_notifications` uses [Melos](https://melos.invertase.dev) to manage the monorepo project.
+
+To install Melos, run the following command from a terminal/command prompt:
+
+```
+dart pub global activate melos
+```
+
+At the root of your locally cloned repository bootstrap the all dependencies and link them locally
+
+```
+melos bootstrap
+```
+
+This removes the need for providing manual [`dependency_overrides`](https://dart.dev/tools/pub/pubspec). There's no need to run `flutter pub get` either. All the packages, example app and tests will run for the locally cloned repository. The workflows setup on GitHub are also configured use Melos to validate changes. For more information on Melos, refer to its [website](https://melos.invertase.dev)
